@@ -1,3 +1,5 @@
+# Template only — install.sh writes the real entry with an absolute Exec
+# path into ~/.local/share/applications/.
 [Desktop Entry]
 Name=package-hub
 GenericName=App Store

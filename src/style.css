@@ -715,3 +715,170 @@
     --shadow-lg: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.05);
   }
 }
+
+/* ── filter chip bars (source + category) ──────────────────────────────── */
+.cat-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+/* ── card subtitle ─────────────────────────────────────────────────────── */
+.app-card-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 6px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
+}
+
+/* ── results truncation note ───────────────────────────────────────────── */
+.results-note {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 8px 0 0;
+}
+
+/* ── per-source warning banner ─────────────────────────────────────────── */
+.warn-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 10px 16px;
+  margin-bottom: 20px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgb(234 179 8 / 0.4);
+  background: rgb(234 179 8 / 0.1);
+  color: var(--warning);
+  font-size: 13px;
+  overflow: hidden;
+}
+.warn-detail {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── badge base ────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── lists (installed / updates) ───────────────────────────────────────── */
+.app-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── updates sections ──────────────────────────────────────────────────── */
+.update-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.update-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.update-source {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+.update-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.update-rows {
+  margin-bottom: 16px;
+}
+.update-all-btn {
+  width: 100%;
+}
+
+/* ── settings ──────────────────────────────────────────────────────────── */
+.settings-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  max-width: 640px;
+}
+.settings-card-title {
+  margin: 0 0 14px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.settings-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.settings-select {
+  background: var(--surface-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.settings-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.settings-list {
+  display: flex;
+  flex-direction: column;
+}
+.settings-source-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-source-item:last-child {
+  border-bottom: none;
+}
+.settings-source-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+.settings-actions {
+  display: flex;
+  gap: 10px;
+}
+.settings-btn {
+  height: 38px;
+}
+.empty-note {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin: 0;
+}

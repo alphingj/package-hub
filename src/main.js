@@ -1,23 +1,20 @@
 /**
  * package-hub — main application entry
- * Wires shell, navigation, Tauri commands, and event streaming.
+ * Wires shell, navigation, and the packages-changed refresh loop.
+ * All toasts + refreshes come from the operation wrappers in components.js;
+ * this file never duplicates them.
  */
 
-import { state, showToast, applyTheme, escapeHtml } from './ui.js';
-import { renderBrowse, renderInstalled, renderUpdates, renderSettings } from './views.js';
 import {
-  detectBackends,
-  onInstallOutput,
-  onRemoveOutput,
-  onUpdateOutput,
-  onOperationComplete,
-} from './api.js';
+  state, showToast, applyTheme, loadTheme, onPackagesChanged,
+} from './ui.js';
+import { renderBrowse, renderInstalled, renderUpdates, renderSettings } from './views.js';
+import { detectBackends } from './api.js';
 
 let contentEl = null;
 let navLinks = {};
 let sidebarStatus = null;
 let themeBtn = null;
-let refreshBtn = null;
 
 /* ── shell ─────────────────────────────────────────────────────────────── */
 
@@ -66,36 +63,28 @@ function initShell() {
         <div class="view-container" id="view-container"></div>
       </main>
     </div>
-
-    <div class="toast-container" id="toast-container"></div>
-    <div id="install-log-panel" class="hidden"></div>
   `;
 
   contentEl = document.getElementById('view-container');
   sidebarStatus = document.getElementById('sidebar-status');
   themeBtn = document.getElementById('btn-theme');
-  refreshBtn = document.getElementById('btn-refresh');
+  const refreshBtn = document.getElementById('btn-refresh');
 
-  document.querySelectorAll('[data-view]').forEach(el => {
+  document.querySelectorAll('[data-view]').forEach((el) => {
     navLinks[el.dataset.view] = el;
-  });
-
-  Object.entries(navLinks).forEach(([view, el]) => {
-    el.addEventListener('click', () => setActiveView(view));
+    el.addEventListener('click', () => setActiveView(el.dataset.view));
   });
 
   themeBtn.addEventListener('click', () => {
     const themes = ['light', 'dark', 'system'];
-    const cur = state.theme;
-    const next = themes[(themes.indexOf(cur) + 1) % themes.length];
-    state.theme = next;
+    const next = themes[(themes.indexOf(state.theme) + 1) % themes.length];
     applyTheme(next);
     updateThemeIcon(next);
   });
 
   refreshBtn.addEventListener('click', () => setActiveView(state.activeView));
 
-  applyTheme(state.theme);
+  applyTheme(loadTheme());
   updateThemeIcon(state.theme);
 }
 
@@ -123,57 +112,14 @@ function setActiveView(view) {
   }
 }
 
-/* ── Tauri event wiring ────────────────────────────────────────────────── */
-
-async function wireEvents() {
-  await onInstallOutput((payload) => {
-    const { package: pkgName, line } = payload;
-    console.log(`[install ${pkgName}] ${line}`);
-  });
-
-  await onRemoveOutput((payload) => {
-    const { package: pkgName, line } = payload;
-    console.log(`[remove ${pkgName}] ${line}`);
-  });
-
-  await onUpdateOutput((payload) => {
-    console.log(`[update] ${payload.line}`);
-  });
-
-  await onOperationComplete('install-complete', (payload) => {
-    const { package: pkgName, success } = payload;
-    if (success) {
-      showToast(`"${escapeHtml(pkgName)}" installed`, 'success');
-    } else {
-      showToast(`"${escapeHtml(pkgName)}" install failed`, 'error');
-    }
-    setTimeout(() => setActiveView(state.activeView), 600);
-  });
-
-  await onOperationComplete('remove-complete', (payload) => {
-    const { package: pkgName, success } = payload;
-    if (success) {
-      showToast(`"${escapeHtml(pkgName)}" removed`, 'success');
-    } else {
-      showToast(`"${escapeHtml(pkgName)}" removal failed`, 'error');
-    }
-    setTimeout(() => setActiveView(state.activeView), 600);
-  });
-
-  await onOperationComplete('update-complete', (payload) => {
-    if (payload.success) {
-      showToast('Updates applied', 'success');
-    } else {
-      showToast(`Update failed: ${escapeHtml(String(payload.error || ''))}`, 'error');
-    }
-    setTimeout(() => setActiveView(state.activeView), 600);
-  });
-}
-
 /* ── bootstrap ─────────────────────────────────────────────────────────── */
 
 async function bootstrap() {
   initShell();
+
+  // After any successful install/remove/update, refresh the current view
+  // exactly once (components.js emits; this is the single subscriber).
+  onPackagesChanged(() => setActiveView(state.activeView));
 
   try {
     const backends = await detectBackends();
@@ -181,13 +127,14 @@ async function bootstrap() {
     if (sidebarStatus) {
       sidebarStatus.textContent = `${backends.length} source${backends.length !== 1 ? 's' : ''} ready`;
     }
-    showToast(`Detected ${backends.length} package source${backends.length !== 1 ? 's' : ''}`, 'info');
+    if (backends.length === 0) {
+      showToast('No supported package managers detected (apt, dnf, pacman, zypper, flatpak)', 'error');
+    }
   } catch (err) {
     if (sidebarStatus) sidebarStatus.textContent = 'Detection failed';
-    showToast(`Failed to detect package managers: ${escapeHtml(String(err))}`, 'error');
+    showToast(`Failed to detect package managers: ${String(err)}`, 'error');
   }
 
-  await wireEvents();
   setActiveView('browse');
 }
 

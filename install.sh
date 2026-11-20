@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # package-hub install script
 # Installs the package-hub GUI binary so it can be run as either
-# `package-hub` or `packagehub`.
+# `package-hub` or `packagehub`, plus a desktop entry and icon.
 set -euo pipefail
 
 BINARY_NAME="package-hub"
 RELEASE_DIR="src-tauri/target/release"
 
-# Resolve the directory of this script so it works from any CWD.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 BINARY_PATH="$SCRIPT_DIR/$RELEASE_DIR/$BINARY_NAME"
 
 if [[ ! -x "$BINARY_PATH" ]]; then
@@ -18,7 +16,8 @@ if [[ ! -x "$BINARY_PATH" ]]; then
   exit 1
 fi
 
-# Pick an install directory: prefer /usr/local/bin (system-wide), fall back to ~/.local/bin (user, no sudo needed).
+# Pick an install directory: prefer /usr/local/bin (system-wide), fall back
+# to ~/.local/bin (user, no sudo needed).
 if [[ -w /usr/local/bin ]]; then
   INSTALL_DIR="/usr/local/bin"
   USE_SUDO=""
@@ -33,18 +32,24 @@ fi
 
 echo "Installing $BINARY_NAME to $INSTALL_DIR..."
 
-# Install the primary binary.
+# Remove any existing binary first: cp onto a running executable fails with
+# "Text file busy", but a fresh mv into place never does.
+TMP_BIN="$INSTALL_DIR/.package-hub.new.$$"
 if [[ -n "$USE_SUDO" ]]; then
-  sudo cp "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
-  sudo chmod 755 "$INSTALL_DIR/$BINARY_NAME"
+  sudo cp "$BINARY_PATH" "$TMP_BIN"
+  sudo chmod 755 "$TMP_BIN"
+  sudo rm -f "$INSTALL_DIR/$BINARY_NAME"
+  sudo mv "$TMP_BIN" "$INSTALL_DIR/$BINARY_NAME"
 else
-  cp "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
-  chmod 755 "$INSTALL_DIR/$BINARY_NAME"
+  cp "$BINARY_PATH" "$TMP_BIN"
+  chmod 755 "$TMP_BIN"
+  rm -f "$INSTALL_DIR/$BINARY_NAME"
+  mv "$TMP_BIN" "$INSTALL_DIR/$BINARY_NAME"
 fi
 
 # Create the alias command name: packagehub -> package-hub
 ALIAS_PATH="$INSTALL_DIR/packagehub"
-if [[ -e "$ALIAS_PATH" ]] || [[ -L "$ALIAS_PATH" ]]; then
+if [[ -e "$ALIAS_PATH" || -L "$ALIAS_PATH" ]]; then
   echo "Alias packagehub already exists, skipping."
 else
   if [[ -n "$USE_SUDO" ]]; then
@@ -55,19 +60,42 @@ else
   echo "Created alias: packagehub -> $BINARY_NAME"
 fi
 
-# Install .desktop file for application menu integration.
-DESKTOP_FILE="$SCRIPT_DIR/package-hub.desktop"
-if [[ -f "$DESKTOP_FILE" ]]; then
-  DESKTOP_DIR="$HOME/.local/share/applications"
-  mkdir -p "$DESKTOP_DIR"
-  cp "$DESKTOP_FILE" "$DESKTOP_DIR/"
-  chmod 644 "$DESKTOP_DIR/package-hub.desktop"
-  echo "Installed desktop entry to $DESKTOP_DIR/"
+# Install icon for the application menu.
+ICON_SRC="$SCRIPT_DIR/src-tauri/icons/128x128@2x.png"   # 256x256
+ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+if [[ -f "$ICON_SRC" ]]; then
+  mkdir -p "$ICON_DIR"
+  cp "$ICON_SRC" "$ICON_DIR/package-hub.png"
+  chmod 644 "$ICON_DIR/package-hub.png"
+  echo "Installed icon to $ICON_DIR/"
 fi
+
+# Install .desktop entry with an ABSOLUTE Exec path — menu launches must not
+# depend on PATH containing ~/.local/bin.
+DESKTOP_DIR="$HOME/.local/share/applications"
+mkdir -p "$DESKTOP_DIR"
+cat > "$DESKTOP_DIR/package-hub.desktop" <<EOF
+[Desktop Entry]
+Name=package-hub
+GenericName=App Store
+Comment=Install, remove, and update software without the terminal
+Exec=$INSTALL_DIR/package-hub
+Icon=package-hub
+Terminal=false
+Type=Application
+Categories=System;PackageManager;GTK;
+StartupNotify=true
+Keywords=apt;dnf;pacman;zypper;flatpak;install;software;store;
+EOF
+chmod 644 "$DESKTOP_DIR/package-hub.desktop"
+echo "Installed desktop entry to $DESKTOP_DIR/"
+
+# Refresh icon cache if the tool exists (non-fatal if it doesn't).
+command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+  gtk-update-icon-cache -q -t -f "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
 echo ""
 echo "Installation complete."
 echo "Run the app with:  package-hub   or   packagehub"
 echo "Binary location:   $INSTALL_DIR/$BINARY_NAME"
-echo "Alias location:    $ALIAS_PATH"
-echo "Or find 'package-hub' in your application menu."
+echo "Menu entry:        package-hub (application menu)"

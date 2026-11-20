@@ -1,19 +1,19 @@
 /**
  * package-hub views
- * Browse, Installed, Updates, Settings, Detail modal.
+ * Browse, Installed, Updates, Settings.
  */
 
 import {
   state, showToast, applyTheme, escapeHtml,
 } from './ui.js';
 import {
-  el, btn, avatar, createAppCard, createAppRow,
+  el, createAppCard, createAppRow,
   createEmptyState, createLoadingState, createDetailModal,
-  sourceLabel,
+  createSourceErrors, sourceLabel,
 } from './components.js';
 import {
   searchPackages, listInstalledPackages, checkUpdates,
-  installPackage, removePackage, updateAllPackages,
+  installPackage, removePackage, updatePackage, updateAllPackages,
 } from './api.js';
 
 /* ── keyword → category guesser ───────────────────────────────────────── */
@@ -26,32 +26,22 @@ function guessCategory(name, description = '') {
     [['game', 'steam', 'minecraft', 'lutris', 'wine', 'play', 'games', 'tetris', 'frozen'], 'games'],
     [['libreoffice', 'writer', 'calc', 'impress', 'office', 'word', 'excel', 'document', 'spreadsheet', 'presentation'], 'office'],
     [['firefox', 'chrome', 'chromium', 'browser', 'thunderbird', 'email', 'mail', 'chat', 'discord', 'slack', 'signal', 'telegram'], 'internet'],
-    [['vlc', 'mpv', 'player', 'video', 'audio', 'music', 'sound', 'spotify', 'radio', 'sound', 'podcast', 'audacity'], 'media'],
+    [['vlc', 'mpv', 'player', 'video', 'audio', 'music', 'sound', 'spotify', 'radio', 'podcast', 'audacity'], 'media'],
     [['gnome', 'kde', 'settings', 'manager', 'system', 'kernel', 'driver', 'firmware', 'tweak', 'utility', 'tool', 'admin', 'config'], 'system'],
     [['geogebra', 'scratch', 'education', 'learn', 'teach', 'kid', 'student', 'school', 'math'], 'edu'],
   ];
   for (const [keywords, cat] of rules) {
-    if (keywords.some(k => haystack.includes(k))) return cat;
+    if (keywords.some((k) => haystack.includes(k))) return cat;
   }
   return 'system';
 }
 
-/* ── shared render helpers ────────────────────────────────────────────── */
-
-function attachInstallLog() {
-  const el = document.getElementById('install-log');
-  if (el) el.innerHTML = '';
+/** Decorate a copy of the package — never mutate shared objects. */
+function withCategory(pkg) {
+  return { ...pkg, category: pkg.category || guessCategory(pkg.name, pkg.description || '') };
 }
 
-function appendInstallLog(line) {
-  const el = document.getElementById('install-log');
-  if (!el) return;
-  const d = document.createElement('div');
-  d.className = 'log-line';
-  d.textContent = line;
-  el.appendChild(d);
-  el.scrollTop = el.scrollHeight;
-}
+const MAX_RESULTS = 60;
 
 /* ── Browse view ──────────────────────────────────────────────────────── */
 
@@ -69,14 +59,32 @@ export function renderBrowse(container) {
   `;
   page.appendChild(header);
 
-  /* Search */
+  /* Search (min 2 chars before we hit the backends) */
   const searchWrap = el('div', 'search-wrap');
   searchWrap.innerHTML = `
     <span class="search-icon">🔍</span>
-    <input class="search-input" type="text" placeholder="Search apps…" value="${escapeHtml(state.searchQuery)}">
+    <input class="search-input" type="text" placeholder="Search apps (min 2 characters)…" aria-label="Search apps">
   `;
   const searchInput = searchWrap.querySelector('.search-input');
+  searchInput.value = state.searchQuery;
   page.appendChild(searchWrap);
+
+  /* Source filter chips */
+  const sourceBar = el('div', 'cat-bar');
+  const sourceChips = [];
+  const sourceOptions = [['All sources', null], ...state.backends.map((b) => [b.label, b.source])];
+  sourceOptions.forEach(([label, src]) => {
+    const chip = el('button', `cat-chip ${state.activeSource === src ? 'active' : ''}`);
+    chip.textContent = label;
+    chip.onclick = () => {
+      state.activeSource = src;
+      sourceChips.forEach(({ chip: c, src: s }) => c.classList.toggle('active', state.activeSource === s));
+      load();
+    };
+    sourceChips.push({ chip, src });
+    sourceBar.appendChild(chip);
+  });
+  page.appendChild(sourceBar);
 
   /* Category chips */
   const cats = [
@@ -91,81 +99,132 @@ export function renderBrowse(container) {
     ['Education', 'edu'],
   ];
   const catBar = el('div', 'cat-bar');
+  const catChips = [];
   cats.forEach(([label, cat]) => {
     const chip = el('button', `cat-chip ${state.activeCategory === cat ? 'active' : ''}`);
-    chip.innerHTML = `<span class="chip-dot" style="background: ${cat ? `var(--cat-${cat})` : 'var(--text-muted)'}"></span>${escapeHtml(label)}`;
+    const dot = el('span', 'chip-dot');
+    dot.style.background = cat ? `var(--cat-${cat})` : 'var(--text-muted)';
+    chip.append(dot, document.createTextNode(label));
     chip.onclick = () => {
       state.activeCategory = cat;
-      renderBrowse(container);
+      catChips.forEach(({ chip: c, cat: k }) => c.classList.toggle('active', state.activeCategory === k));
+      load();
     };
+    catChips.push({ chip, cat });
     catBar.appendChild(chip);
   });
   page.appendChild(catBar);
 
-  /* Results */
+  /* Error banner + results */
+  const errorSlot = el('div');
+  page.appendChild(errorSlot);
+
   const results = el('div', 'apps-grid');
   page.appendChild(results);
+  container.appendChild(page);
 
+  /* Search result cache — typing "firefox" doesn't re-run every prefix. */
+  const cache = new Map();
   let debounceTimer;
+  let seq = 0; // guard against out-of-order async responses
+
   async function load() {
+    const query = state.searchQuery.trim();
+    const mySeq = ++seq;
+
     results.innerHTML = '';
-    results.appendChild(createLoadingState());
 
-    try {
-      const pkgs = await searchPackages(state.searchQuery);
-      const filtered = pkgs.filter(p => {
-        if (!state.activeCategory) return true;
-        return guessCategory(p.name, p.description) === state.activeCategory;
-      });
+    if (query.length < 2) {
+      errorSlot.innerHTML = '';
+      results.appendChild(
+        createEmptyState(
+          '🔍',
+          'Search to get started',
+          'Type at least 2 characters to search your package sources.',
+        ),
+      );
+      return;
+    }
 
-      results.innerHTML = '';
-      if (filtered.length === 0) {
-        results.appendChild(
-          createEmptyState(
-            '📦',
-            'No packages found',
-            'Try a different search term or category.',
-            'Clear search',
-            () => {
-              state.searchQuery = '';
-              searchInput.value = '';
-              renderBrowse(container);
-            }
-          )
-        );
+    let entry = cache.get(query);
+    if (!entry) {
+      results.appendChild(createLoadingState());
+      try {
+        const payload = await searchPackages(query);
+        entry = payload;
+        cache.set(query, entry);
+        if (cache.size > 20) {
+          cache.delete(cache.keys().next().value);
+        }
+      } catch (err) {
+        if (mySeq !== seq) return;
+        results.innerHTML = '';
+        results.appendChild(createEmptyState('⚠️', 'Search failed', String(err)));
         return;
       }
+    }
 
-      filtered.forEach(pkg => {
-        pkg.category = pkg.category || guessCategory(pkg.name, pkg.description);
-        const card = createAppCard(pkg, {
-          onInstall: (source, name) => installPackage(source, name),
-          onRemove: (source, name) => removePackage(source, name),
-          onUpdate: (source) => updateAllPackages(source),
-          onDetail: (p) => {
-            if (p) createDetailModal(p, {
-              onInstall: (source, name) => installPackage(source, name),
-              onRemove: (source, name) => removePackage(source, name),
-              onUpdate: (source) => updateAllPackages(source),
-            });
+    if (mySeq !== seq) return; // stale response, a newer search is running
+
+    errorSlot.innerHTML = '';
+    const warn = createSourceErrors(entry.errors);
+    if (warn) errorSlot.appendChild(warn);
+
+    let pkgs = entry.results.map(withCategory);
+    if (state.activeSource) {
+      pkgs = pkgs.filter((p) => p.source === state.activeSource);
+    }
+    if (state.activeCategory) {
+      pkgs = pkgs.filter((p) => p.category === state.activeCategory);
+    }
+
+    results.innerHTML = '';
+    if (pkgs.length === 0) {
+      results.appendChild(
+        createEmptyState(
+          '📦',
+          'No packages found',
+          'Try a different search term, source, or category.',
+          'Clear search',
+          () => {
+            state.searchQuery = '';
+            searchInput.value = '';
+            searchInput.focus();
+            load();
           },
-        });
-        results.appendChild(card);
+        ),
+      );
+      return;
+    }
+
+    const shown = pkgs.slice(0, MAX_RESULTS);
+    shown.forEach((pkg) => {
+      const card = createAppCard(pkg, {
+        onInstall: (source, name) => installPackage(source, name),
+        onRemove: (source, name) => removePackage(source, name),
+        onDetail: (p) => createDetailModal(p, {
+          onInstall: (s, n) => installPackage(s, n),
+          onRemove: (s, n) => removePackage(s, n),
+          onUpdate: (s, n) => updatePackage(s, n),
+        }),
       });
-    } catch (err) {
-      results.innerHTML = '';
-      results.appendChild(createEmptyState('⚠️', 'Search failed', escapeHtml(String(err))));
+      results.appendChild(card);
+    });
+
+    if (pkgs.length > MAX_RESULTS) {
+      const note = el('p', 'results-note');
+      note.textContent = `Showing ${MAX_RESULTS} of ${pkgs.length} results — refine your search to see more.`;
+      results.appendChild(note);
     }
   }
 
   searchInput.addEventListener('input', (e) => {
     state.searchQuery = e.target.value;
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(load, 200);
+    debounceTimer = setTimeout(load, 250);
   });
 
   load();
-  container.appendChild(page);
 }
 
 /* ── Installed view ──────────────────────────────────────────────────── */
@@ -174,7 +233,6 @@ export function renderInstalled(container) {
   container.innerHTML = '';
 
   const page = el('div', 'view');
-
   const header = el('div', 'page-header');
   header.innerHTML = `
     <span class="page-eyebrow">Library</span>
@@ -182,6 +240,9 @@ export function renderInstalled(container) {
     <p class="page-sub">Manage software already on your system.</p>
   `;
   page.appendChild(header);
+
+  const errorSlot = el('div');
+  page.appendChild(errorSlot);
 
   const list = el('div', 'app-list');
   page.appendChild(list);
@@ -191,35 +252,42 @@ export function renderInstalled(container) {
     list.innerHTML = '';
     list.appendChild(createLoadingState());
 
+    let payload;
     try {
-      const pkgs = await listInstalledPackages();
-      state.installed = pkgs;
-
-      list.innerHTML = '';
-      if (pkgs.length === 0) {
-        list.appendChild(
-          createEmptyState(
-            '📦',
-            'Nothing installed yet',
-            'Install apps from Browse and they’ll appear here.'
-          )
-        );
-        return;
-      }
-
-      pkgs.sort((a, b) => a.name.localeCompare(b.name));
-      pkgs.forEach(pkg => {
-        pkg.category = pkg.category || guessCategory(pkg.name, pkg.description);
-        const row = createAppRow(pkg, {
-          onRemove: (source, name) => removePackage(source, name),
-          onUpdate: (source) => updateAllPackages(source),
-        });
-        list.appendChild(row);
-      });
+      payload = await listInstalledPackages();
     } catch (err) {
       list.innerHTML = '';
-      list.appendChild(createEmptyState('⚠️', 'Load failed', escapeHtml(String(err))));
+      list.appendChild(createEmptyState('⚠️', 'Load failed', String(err)));
+      return;
     }
+
+    errorSlot.innerHTML = '';
+    const warn = createSourceErrors(payload.errors);
+    if (warn) errorSlot.appendChild(warn);
+
+    const pkgs = payload.results;
+    state.installed = pkgs;
+
+    list.innerHTML = '';
+    if (pkgs.length === 0) {
+      list.appendChild(
+        createEmptyState('📦', 'Nothing installed yet', 'Install apps from Browse and they’ll appear here.'),
+      );
+      return;
+    }
+
+    const sorted = [...pkgs].sort((a, b) => a.name.localeCompare(b.name));
+    const frag = document.createDocumentFragment();
+    sorted.forEach((pkg) => {
+      frag.appendChild(
+        createAppRow(withCategory(pkg), {
+          onRemove: (s, n) => removePackage(s, n),
+          onUpdate: (s, n) => updatePackage(s, n),
+          onUpdateAll: (s) => updateAllPackages(s),
+        }),
+      );
+    });
+    list.appendChild(frag);
   }
 
   load();
@@ -231,7 +299,6 @@ export function renderUpdates(container) {
   container.innerHTML = '';
 
   const page = el('div', 'view');
-
   const header = el('div', 'page-header');
   header.innerHTML = `
     <span class="page-eyebrow">Maintenance</span>
@@ -239,6 +306,9 @@ export function renderUpdates(container) {
     <p class="page-sub">Keep your software up to date.</p>
   `;
   page.appendChild(header);
+
+  const errorSlot = el('div');
+  page.appendChild(errorSlot);
 
   const list = el('div', 'app-list');
   page.appendChild(list);
@@ -248,76 +318,83 @@ export function renderUpdates(container) {
     list.innerHTML = '';
     list.appendChild(createLoadingState());
 
+    let payload;
     try {
-      const updates = await checkUpdates();
-      state.updates = updates;
-
-      list.innerHTML = '';
-      if (updates.length === 0) {
-        list.appendChild(
-          createEmptyState(
-            '✅',
-            'Your system is up to date',
-            'No packages have available updates.'
-          )
-        );
-        return;
-      }
-
-      const bySource = {};
-      updates.forEach(u => {
-        if (!bySource[u.source]) bySource[u.source] = [];
-        bySource[u.source].push(u);
-      });
-
-      Object.entries(bySource).forEach(([source, pkgs]) => {
-        const section = el('div', 'update-section');
-        const catColor = CAT_COLORS_MAP[source] || 'var(--text-muted)';
-
-        const head = el('div', 'update-section-head');
-        head.innerHTML = `
-          <span class="update-source" style="color: ${catColor}">${sourceLabel(source)}</span>
-          <span class="update-count">${pkgs.length} update${pkgs.length !== 1 ? 's' : ''}</span>
-        `;
-
-        const rows = el('div', 'update-rows');
-        pkgs.forEach(pkg => {
-          pkg.category = pkg.category || guessCategory(pkg.name, pkg.description);
-          const row = createAppRow(pkg, {
-            onRemove: (s, n) => removePackage(s, n),
-            onUpdate: (s) => updateAllPackages(s),
-          });
-          rows.appendChild(row);
-        });
-
-        const updateAll = el('button', 'btn-primary update-all-btn', `Update all ${pkgs.length}`);
-        updateAll.onclick = async () => {
-          if (state.installing.has(`__all_${source}`)) return;
-          try {
-            state.installing.add(`__all_${source}`);
-            updateAll.disabled = true;
-            updateAll.textContent = 'Updating all…';
-            await updateAllPackages(source);
-            showToast(`All ${sourceLabel(source)} updates applied`, 'success');
-            load();
-          } catch (err) {
-            showToast(`Update failed: ${escapeHtml(String(err))}`, 'error');
-          } finally {
-            state.installing.delete(`__all_${source}`);
-            updateAll.disabled = false;
-            updateAll.textContent = `Update all ${pkgs.length}`;
-          }
-        };
-
-        section.appendChild(head);
-        section.appendChild(rows);
-        section.appendChild(updateAll);
-        list.appendChild(section);
-      });
+      payload = await checkUpdates();
     } catch (err) {
       list.innerHTML = '';
-      list.appendChild(createEmptyState('⚠️', 'Load failed', escapeHtml(String(err))));
+      list.appendChild(createEmptyState('⚠️', 'Load failed', String(err)));
+      return;
     }
+
+    errorSlot.innerHTML = '';
+    const warn = createSourceErrors(payload.errors);
+    if (warn) errorSlot.appendChild(warn);
+
+    const updates = payload.results;
+    state.updates = updates;
+
+    list.innerHTML = '';
+    if (updates.length === 0) {
+      list.appendChild(
+        createEmptyState('✅', 'Your system is up to date', 'No packages have available updates.'),
+      );
+      return;
+    }
+
+    const bySource = new Map();
+    updates.forEach((u) => {
+      if (!bySource.has(u.source)) bySource.set(u.source, []);
+      bySource.get(u.source).push(u);
+    });
+
+    bySource.forEach((pkgs, source) => {
+      const section = el('div', 'update-section');
+
+      const head = el('div', 'update-section-head');
+      const sourceEl = el('span', 'update-source', sourceLabel(source));
+      const count = el('span', 'update-count');
+      count.textContent = `${pkgs.length} update${pkgs.length !== 1 ? 's' : ''}`;
+      head.append(sourceEl, count);
+
+      const rows = el('div', 'update-rows');
+      pkgs.forEach((pkg) => {
+        rows.appendChild(
+          createAppRow(withCategory(pkg), {
+            onRemove: (s, n) => removePackage(s, n),
+            onUpdate: (s, n) => updatePackage(s, n),
+            onUpdateAll: (s) => updateAllPackages(s),
+          }),
+        );
+      });
+
+      const updateAll = el('button', 'btn-primary update-all-btn');
+      updateAll.textContent = `Update all ${pkgs.length} ${sourceLabel(source)} package${pkgs.length !== 1 ? 's' : ''}`;
+      const allKey = `all:${source}`;
+      updateAll.onclick = () => {
+        if (state.installing.has(allKey)) return;
+        state.installing.add(allKey);
+        const orig = updateAll.textContent;
+        updateAll.disabled = true;
+        updateAll.textContent = 'Updating all…';
+        updateAllPackages(source)
+          .then(() => {
+            showToast(`All ${sourceLabel(source)} updates applied`, 'success');
+          })
+          .catch((err) => {
+            showToast(`Update failed: ${String(err)}`, 'error');
+          })
+          .finally(() => {
+            state.installing.delete(allKey);
+            updateAll.disabled = false;
+            updateAll.textContent = orig;
+            load();
+          });
+      };
+
+      section.append(head, rows, updateAll);
+      list.appendChild(section);
+    });
   }
 
   load();
@@ -329,7 +406,6 @@ export function renderSettings(container) {
   container.innerHTML = '';
 
   const page = el('div', 'view');
-
   const header = el('div', 'page-header');
   header.innerHTML = `
     <span class="page-eyebrow">Preferences</span>
@@ -340,79 +416,69 @@ export function renderSettings(container) {
 
   /* Theme card */
   const themeCard = el('div', 'settings-card');
-  themeCard.innerHTML = `
-    <h3 class="settings-card-title">Appearance</h3>
-    <div class="settings-row">
-      <label class="settings-label">Theme</label>
-      <select class="settings-select" id="theme-select">
-        <option value="system">System</option>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
-    </div>
-  `;
-  const themeSelect = themeCard.querySelector('#theme-select');
+  const themeTitle = el('h3', 'settings-card-title', 'Appearance');
+  const themeRow = el('div', 'settings-row');
+  const themeLabel = el('label', 'settings-label', 'Theme');
+  themeLabel.htmlFor = 'theme-select';
+  const themeSelect = el('select', 'settings-select');
+  themeSelect.id = 'theme-select';
+  ['system', 'light', 'dark'].forEach((t) => {
+    const opt = el('option');
+    opt.value = t;
+    opt.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+    themeSelect.appendChild(opt);
+  });
   themeSelect.value = state.theme;
-  themeSelect.onchange = (e) => {
-    state.theme = e.target.value;
-    applyTheme(state.theme);
-  };
+  themeSelect.onchange = (e) => applyTheme(e.target.value);
+  themeRow.append(themeLabel, themeSelect);
+  themeCard.append(themeTitle, themeRow);
   page.appendChild(themeCard);
 
   /* Sources card */
   const sourcesCard = el('div', 'settings-card');
-  sourcesCard.innerHTML = `
-    <h3 class="settings-card-title">Package Sources</h3>
-    <div class="settings-list" id="sources-list"></div>
-  `;
-  const sourcesList = sourcesCard.querySelector('#sources-list');
-  page.appendChild(sourcesCard);
-
+  const sourcesTitle = el('h3', 'settings-card-title', 'Package Sources');
+  const sourcesList = el('div', 'settings-list');
   if (state.backends.length === 0) {
-    sourcesList.innerHTML = '<p class="empty-note">No package managers detected.</p>';
+    sourcesList.appendChild(el('p', 'empty-note', 'No package managers detected.'));
   } else {
-    state.backends.forEach(b => {
+    state.backends.forEach((b) => {
       const item = el('div', 'settings-source-item');
-      item.innerHTML = `
-        <span class="settings-source-name">${escapeHtml(b.label)}</span>
-        <span class="badge badge-installed">Available</span>
-      `;
+      const nameEl = el('span', 'settings-source-name');
+      nameEl.textContent = `${b.label} (${b.source})`;
+      const badge = el('span', 'badge badge-installed', 'Available');
+      item.append(nameEl, badge);
       sourcesList.appendChild(item);
     });
   }
+  sourcesCard.append(sourcesTitle, sourcesList);
+  page.appendChild(sourcesCard);
 
-  /* Actions card */
+  /* Maintenance card */
   const actionsCard = el('div', 'settings-card');
-  actionsCard.innerHTML = `
-    <h3 class="settings-card-title">Maintenance</h3>
-    <div class="settings-actions">
-      <button class="btn-primary settings-btn" id="check-updates-btn">Check for updates</button>
-    </div>
-  `;
-  const checkBtn = actionsCard.querySelector('#check-updates-btn');
+  const actionsTitle = el('h3', 'settings-card-title', 'Maintenance');
+  const actionsRow = el('div', 'settings-actions');
+  const checkBtn = el('button', 'btn-primary settings-btn', 'Check for updates');
   checkBtn.onclick = async () => {
     checkBtn.disabled = true;
     checkBtn.textContent = 'Checking…';
     try {
-      await checkUpdates();
-      showToast('Update check complete', 'success');
+      const payload = await checkUpdates();
+      const failed = payload.errors.length;
+      if (failed > 0) {
+        showToast(`Update check done; ${failed} source${failed !== 1 ? 's' : ''} unavailable`, 'info');
+      } else {
+        showToast(`Update check done — ${payload.results.length} update${payload.results.length !== 1 ? 's' : ''} found`, 'success');
+      }
     } catch (err) {
-      showToast(`Check failed: ${escapeHtml(String(err))}`, 'error');
+      showToast(`Check failed: ${String(err)}`, 'error');
     } finally {
       checkBtn.disabled = false;
       checkBtn.textContent = 'Check for updates';
     }
   };
+  actionsRow.appendChild(checkBtn);
+  actionsCard.append(actionsTitle, actionsRow);
   page.appendChild(actionsCard);
 
   container.appendChild(page);
 }
-
-/* ── category color map for source labels in updates ── */
-const CAT_COLORS_MAP = {
-  apt: 'var(--cat-internet)',
-  dnf: 'var(--cat-dev)',
-  pacman: 'var(--cat-system)',
-  zypper: 'var(--cat-games)',
-  flatpak: 'var(--cat-media)',
-};

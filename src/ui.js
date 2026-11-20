@@ -5,32 +5,47 @@
 export const state = {
   theme: 'dark',
   backends: [],
-  packages: [],
   installed: [],
   updates: [],
   activeView: 'browse',
-  activeBackend: null,
   activeCategory: null,
+  activeSource: null,
   searchQuery: '',
-  loading: false,
   installing: new Set(),
 };
 
-/* ── escape HTML ───────────────────────────────────────────────────────── */
+const THEME_KEY = 'package-hub-theme';
+
+export function loadTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) || 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+/* ── escape HTML (quotes included, safe for attributes) ────────────────── */
 
 export function escapeHtml(text) {
-  if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  if (text === null || text === undefined) return '';
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 /* ── toast notifications ───────────────────────────────────────────────── */
 
 let toastContainer = null;
 
+/**
+ * Show a toast. `message` is plain text — it is rendered via textContent,
+ * so callers must NOT pre-escape it.
+ */
 export function showToast(message, type = 'info') {
-  if (!toastContainer) {
+  if (!toastContainer || !toastContainer.isConnected) {
     toastContainer = document.createElement('div');
     toastContainer.className = 'toast-container';
     document.body.appendChild(toastContainer);
@@ -38,38 +53,56 @@ export function showToast(message, type = 'info') {
 
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.innerHTML = `
-    <span class="toast-message">${escapeHtml(message)}</span>
-    <button class="toast-close" aria-label="Dismiss">✕</button>
-  `;
-  toast.querySelector('.toast-close').onclick = () => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translatex(120px)';
-    setTimeout(() => toast.remove(), 300);
-  };
 
+  const msg = document.createElement('span');
+  msg.className = 'toast-message';
+  msg.textContent = message;
+
+  const close = document.createElement('button');
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.textContent = '✕';
+  close.onclick = () => dismiss(toast);
+
+  toast.append(msg, close);
   toastContainer.appendChild(toast);
 
-  // Auto-dismiss after 5 seconds
-  setTimeout(() => {
-    if (toast.isConnected) {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translatex(120px)';
-      setTimeout(() => toast.remove(), 300);
-    }
-  }, 5000);
+  setTimeout(() => dismiss(toast), 5000);
+}
+
+function dismiss(toast) {
+  if (!toast.isConnected) return;
+  toast.style.opacity = '0';
+  toast.style.transform = 'translatex(120px)';
+  setTimeout(() => toast.remove(), 300);
 }
 
 /* ── theme ─────────────────────────────────────────────────────────────── */
 
 export function applyTheme(theme) {
+  state.theme = theme;
   const root = document.documentElement;
   if (theme === 'system') {
-    const system = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    root.setAttribute('data-theme', system);
-    root.classList.toggle('dark', system === 'dark');
+    root.removeAttribute('data-theme');
   } else {
     root.setAttribute('data-theme', theme);
-    root.classList.toggle('dark', theme === 'dark');
   }
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    /* storage unavailable — theme just won't persist */
+  }
+}
+
+/* ── operation pub/sub: views refresh after any successful op ──────────── */
+
+const changeListeners = new Set();
+
+export function onPackagesChanged(cb) {
+  changeListeners.add(cb);
+  return () => changeListeners.delete(cb);
+}
+
+export function emitPackagesChanged() {
+  changeListeners.forEach((cb) => cb());
 }
