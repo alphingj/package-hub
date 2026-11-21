@@ -43,6 +43,11 @@ function withCategory(pkg) {
 
 const MAX_RESULTS = 60;
 
+/* Module-level search cache — survives view re-renders (e.g. after a
+ * package change refresh), so returning to Browse is instant for
+ * recent queries. Oldest entry evicted past 20. */
+const searchCache = new Map();
+
 /* ── Browse view ──────────────────────────────────────────────────────── */
 
 export function renderBrowse(container) {
@@ -123,8 +128,8 @@ export function renderBrowse(container) {
   page.appendChild(results);
   container.appendChild(page);
 
-  /* Search result cache — typing "firefox" doesn't re-run every prefix. */
-  const cache = new Map();
+  /* Search result cache is module-level (searchCache) so it survives
+   * view re-renders. */
   let debounceTimer;
   let seq = 0; // guard against out-of-order async responses
 
@@ -146,15 +151,15 @@ export function renderBrowse(container) {
       return;
     }
 
-    let entry = cache.get(query);
+    let entry = searchCache.get(query);
     if (!entry) {
       results.appendChild(createLoadingState());
       try {
         const payload = await searchPackages(query);
         entry = payload;
-        cache.set(query, entry);
-        if (cache.size > 20) {
-          cache.delete(cache.keys().next().value);
+        searchCache.set(query, entry);
+        if (searchCache.size > 20) {
+          searchCache.delete(searchCache.keys().next().value);
         }
       } catch (err) {
         if (mySeq !== seq) return;

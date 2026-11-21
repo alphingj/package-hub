@@ -63,13 +63,17 @@ export function avatar(category) {
 
 /* ── shared operation wrapper: spinner + toast + refresh, no duplicates ── */
 
+/** Runs an operation with busy-state + toast + view refresh.
+ *  Returns true on success, false on failure (errors are toasted here). */
 async function runOp(btnEl, busyLabel, doneLabel, work, successMsg, errorPrefix) {
   btnEl.disabled = true;
   btnEl.classList.add('btn-loading');
   btnEl.setAttribute('data-label', doneLabel);
   btnEl.textContent = busyLabel;
+  let ok = false;
   try {
     await work();
+    ok = true;
     showToast(successMsg, 'success');
     emitPackagesChanged();
   } catch (err) {
@@ -79,6 +83,7 @@ async function runOp(btnEl, busyLabel, doneLabel, work, successMsg, errorPrefix)
     btnEl.classList.remove('btn-loading');
     btnEl.textContent = btnEl.getAttribute('data-label') || doneLabel;
   }
+  return ok;
 }
 
 /* ── app card ──────────────────────────────────────────────────────────── */
@@ -166,22 +171,11 @@ export function createAppRow(pkg, handlers) {
     u.onclick = () => {
       if (state.installing.has(opKey(pkg))) return;
       state.installing.add(opKey(pkg));
-      // Per-package update — NOT a full-source upgrade.
+      // Per-package update — NOT a full-source upgrade. Bulk "update all"
+      // lives at the section level in the Updates view, not per row.
       runOp(u, 'Updating…', 'Update', () => onUpdate(pkg.source, pkg.name), `${pkg.name} updated`, 'Update failed');
     };
     right.appendChild(u);
-  }
-
-  if (pkg.update_available && onUpdateAll) {
-    const ua = el('button', 'btn-ghost app-action-btn', 'Update all');
-    ua.title = `Update every ${sourceLabel(pkg.source)} package`;
-    ua.onclick = () => {
-      const allKey = `all:${pkg.source}`;
-      if (state.installing.has(allKey)) return;
-      state.installing.add(allKey);
-      runOp(ua, 'Updating all…', 'Update all', () => onUpdateAll(pkg.source), `All ${sourceLabel(pkg.source)} updates applied`, 'Update all failed');
-    };
-    right.appendChild(ua);
   }
 
   const r = el('button', 'btn-danger app-action-btn', 'Remove');
@@ -306,7 +300,7 @@ export function createDetailModal(pkg, { onInstall, onRemove, onUpdate }) {
       if (state.installing.has(opKey(pkg))) return;
       state.installing.add(opKey(pkg));
       runOp(installBtn, 'Installing…', 'Install', () => onInstall(pkg.source, pkg.name), `${pkg.name} installed`, 'Install failed')
-        .finally(close);
+        .then((ok) => { if (ok) close(); });
     };
     actions.appendChild(installBtn);
   } else {
@@ -316,7 +310,7 @@ export function createDetailModal(pkg, { onInstall, onRemove, onUpdate }) {
         if (state.installing.has(opKey(pkg))) return;
         state.installing.add(opKey(pkg));
         runOp(updateBtn, 'Updating…', 'Update', () => onUpdate(pkg.source, pkg.name), `${pkg.name} updated`, 'Update failed')
-          .finally(close);
+          .then((ok) => { if (ok) close(); });
       };
       actions.appendChild(updateBtn);
     }
@@ -326,7 +320,7 @@ export function createDetailModal(pkg, { onInstall, onRemove, onUpdate }) {
       if (!confirm(`Remove "${pkg.name}"?`)) return;
       state.installing.add(opKey(pkg));
       runOp(removeBtn, 'Removing…', 'Remove', () => onRemove(pkg.source, pkg.name), `${pkg.name} removed`, 'Remove failed')
-        .finally(close);
+        .then((ok) => { if (ok) close(); });
     };
     actions.appendChild(removeBtn);
   }

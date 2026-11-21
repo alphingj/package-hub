@@ -47,18 +47,15 @@ else
   mv "$TMP_BIN" "$INSTALL_DIR/$BINARY_NAME"
 fi
 
-# Create the alias command name: packagehub -> package-hub
+# Create/refresh the alias command name: packagehub -> package-hub.
+# -f replaces a stale alias of any kind (old symlink or regular file).
 ALIAS_PATH="$INSTALL_DIR/packagehub"
-if [[ -e "$ALIAS_PATH" || -L "$ALIAS_PATH" ]]; then
-  echo "Alias packagehub already exists, skipping."
+if [[ -n "$USE_SUDO" ]]; then
+  sudo ln -sfn "$INSTALL_DIR/$BINARY_NAME" "$ALIAS_PATH"
 else
-  if [[ -n "$USE_SUDO" ]]; then
-    sudo ln -s "$INSTALL_DIR/$BINARY_NAME" "$ALIAS_PATH"
-  else
-    ln -s "$INSTALL_DIR/$BINARY_NAME" "$ALIAS_PATH"
-  fi
-  echo "Created alias: packagehub -> $BINARY_NAME"
+  ln -sfn "$INSTALL_DIR/$BINARY_NAME" "$ALIAS_PATH"
 fi
+echo "Alias: packagehub -> $BINARY_NAME"
 
 # Install icon for the application menu.
 ICON_SRC="$SCRIPT_DIR/src-tauri/icons/128x128@2x.png"   # 256x256
