@@ -50,6 +50,25 @@ E.g. Ubuntu 22.04 (GTK 4.6, Adwaita 1.1). Options, in order:
    GTK/Adwaita on any host, any arch Flatpak supports.
 2. Tauri or Slint frontend in repo root (no GTK4 floor).
 
+## GitHub Releases (prebuilt)
+
+Releases page: https://github.com/alphingj/package-hub/releases
+
+Push a tag -> Actions builds + publishes assets (`.tar.gz`, `.deb`,
+`SHA256SUMS-*.txt`) for `amd64` + `arm64`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+# watch: GitHub -> Actions -> Release; assets appear on Releases page
+```
+
+Manual rebuild of same release: Actions -> Release -> Run workflow -> tag.
+`.deb` install: `sudo apt install ./package-hub-gtk_0.1.0_amd64.deb`
+Tarball install: `tar -xzf package-hub-gtk-v0.1.0-linux-amd64.tar.gz && ./package-hub-gtk`
+No AppImage: GTK needs host GTK/Adwaita runtime; `.deb`/tarball + distro
+runtime is the supported path (Flatpak is the universal fallback).
+
 ## Notes
 
 - Privileged ops still via `pkexec`, serialized per backend; live log

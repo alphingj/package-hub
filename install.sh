@@ -5,14 +5,19 @@
 set -euo pipefail
 
 BINARY_NAME="package-hub"
-RELEASE_DIR="src-tauri/target/release"
-
+# GTK4 + Libadwaita frontend is the current binary; Slint/Tauri are fallbacks.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BINARY_PATH="$SCRIPT_DIR/$RELEASE_DIR/$BINARY_NAME"
+BINARY_PATH="$SCRIPT_DIR/gtk/target/release/package-hub-gtk"
+if [[ ! -x "$BINARY_PATH" ]]; then
+  BINARY_PATH="$SCRIPT_DIR/slint/target/release/package-hub-slint"
+fi
+if [[ ! -x "$BINARY_PATH" ]]; then
+  BINARY_PATH="$SCRIPT_DIR/src-tauri/target/release/$BINARY_NAME"
+fi
 
 if [[ ! -x "$BINARY_PATH" ]]; then
-  echo "Error: release binary not found at $BINARY_PATH" >&2
-  echo "Build it first: cd src-tauri && cargo build --release" >&2
+  echo "Error: release binary not found (looked in gtk/, slint/, src-tauri/ release dirs)" >&2
+  echo "Build it first: cargo build --release --manifest-path gtk/Cargo.toml" >&2
   exit 1
 fi
 

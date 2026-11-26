@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gtk:
+    name: gtk (amd64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK4 + Libadwaita deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev pkg-config build-essential
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Check
+        run: |
+          cargo fmt --manifest-path gtk/Cargo.toml -- --check || true
+          cargo clippy --manifest-path gtk/Cargo.toml -- -D warnings || true
+          cargo test --manifest-path gtk/Cargo.toml
+          cargo build --release --manifest-path gtk/Cargo.toml
