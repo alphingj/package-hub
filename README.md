@@ -49,6 +49,12 @@ search, one-click install, installed-app management, and updates.
 | SUSE | openSUSE Leap/Tumbleweed, SLES | zypper |
 | Universal | any distro with flatpak | Flatpak |
 
+## Frontends
+
+- `gtk/` — **GTK4 + Libadwaita (native, recommended)**: see [gtk/README.md](gtk/README.md)
+- root — Tauri + WebView (legacy)
+- `slint/` — Slint native (experimental)
+
 ## Install
 
 ```bash

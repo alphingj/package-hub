@@ -28,5 +28,12 @@ Thumbs.db
 # Tauri
 src-tauri/target/
 
+# Slint / Rust
+slint/target/
+.cargo-slint/
+
 # Reticle session artifacts
 .reticle/
+# GTK frontend
+gtk/target/
+*.bin

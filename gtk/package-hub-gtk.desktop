@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=package-hub (GTK)
+Comment=Native GTK4 app store for apt, dnf, pacman, zypper and Flatpak
+Exec=package-hub-gtk
+Terminal=false
+Type=Application
+Categories=System;PackageManager;GTK;GNOME;
+Keywords=package;install;store;apt;flatpak;
+StartupWMClass=io.alphingj.packagehub
