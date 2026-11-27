@@ -1,4 +1,5 @@
 # package-hub
+![Visitor Count]([https://count.getloli.com/@SA5212H5?theme=3d-num&padding=7&offset=2&align=top&scale=1.2&pixelated=0&darkmode=auto](https://count.getloli.com/@package-hub?theme=3d-num&padding=3&offset=3&align=top&scale=1.2&pixelated=0&darkmode=auto))
 
 A graphical app store for Linux (x86_64). Install, remove, and update
 software without touching a terminal — across apt, dnf, pacman, zypper,
@@ -18,7 +19,7 @@ search, one-click install, installed-app management, and updates.
 │  Browse / Installed / Updates /     │
 │  Settings                           │
 └──────────────┬──────────────────────┘
-               │ Tauri IPC
+               │ Tauri CPI
 ┌──────────────▼──────────────────────┐
 │  Rust backend                       │
 │  Distro detection (/etc/os-release) │
@@ -28,7 +29,7 @@ search, one-click install, installed-app management, and updates.
                │ pkexec (polkit) — root only for the op, never the app
 ┌──────────────▼──────────────────────┐
 │  apt / dnf / pacman / zypper /      │
-│  flatpak                            │
+│ flatpak │
 └─────────────────────────────────────┘
 ```
 
@@ -45,8 +46,8 @@ search, one-click install, installed-app management, and updates.
 |---|---|---|
 | Debian | Debian, Ubuntu, Mint, Kali, Pop!\_OS, elementary | apt |
 | Fedora | Fedora, RHEL, AlmaLinux, Rocky | dnf |
-| Arch | Arch, Manjaro, EndeavourOS | pacman |
-| SUSE | openSUSE Leap/Tumbleweed, SLES | zypper |
+| Arch | Arch, Manjaro, EndeavorOS | pacman |
+| SUSE | openSUSE Leap/Tumbleweed, SLES | zipping |
 | Universal | any distro with flatpak | Flatpak |
 
 ## Frontends
